@@ -2,17 +2,39 @@
 	"name": "pi-auto-context",
 	"version": "0.1.0",
 	"description": "Automatic context management for pi sessions: anchors, pivots, and cross-session recall — with a status line and auto-truncation of stale tool results.",
-	"keywords": ["pi-package", "pi-extension", "context-management", "anchor", "pivot"],
+	"keywords": [
+		"pi",
+		"pi-package",
+		"pi-extension",
+		"pi-skill",
+		"context-management",
+		"anchor",
+		"pivot"
+	],
+	"author": "Ersin Tarhan <ersintarhan@gmail.com>",
 	"license": "MIT",
-	"repository": "github:ersin/pi-auto-context",
+	"homepage": "https://github.com/ersintarhan/pi-auto-context#readme",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/ersintarhan/pi-auto-context.git"
+	},
+	"bugs": {
+		"url": "https://github.com/ersintarhan/pi-auto-context/issues"
+	},
+	"type": "module",
+	"files": [
+		"extensions",
+		"skills",
+		"README.md",
+		"LICENSE"
+	],
 	"pi": {
 		"extensions": ["./extensions"],
 		"skills": ["./skills"]
 	},
 	"peerDependencies": {
-		"@earendil-works/pi-coding-agent": "*",
-		"@earendil-works/pi-agent-core": "*",
-		"@earendil-works/pi-ai": "*",
-		"typebox": "*"
+		"@earendil-works/pi-coding-agent": ">=0.74.0",
+		"@earendil-works/pi-ai": ">=0.74.0",
+		"@sinclair/typebox": "*"
 	}
 }
