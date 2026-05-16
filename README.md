@@ -1,5 +1,8 @@
 # pi-auto-context
 
+[![npm](https://img.shields.io/npm/v/@ersintarhan/pi-auto-context.svg)](https://www.npmjs.com/package/@ersintarhan/pi-auto-context)
+[![license](https://img.shields.io/npm/l/@ersintarhan/pi-auto-context.svg)](./LICENSE)
+
 A [pi](https://pi.dev) package that gives the agent **automatic context management** — anchors, pivots, cross-session recall — through tool calls.
 
 Trimmed-down fork of [tshu-w/pi-control](https://github.com/tshu-w/pi-control) focused purely on context discipline. The session/tree/model routers from upstream are intentionally removed; the agent uses pi's built-in slash commands for those.

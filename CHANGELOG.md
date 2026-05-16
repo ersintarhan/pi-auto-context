@@ -6,6 +6,12 @@ All notable changes to this project are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.1.1] — 2026-05-17
+
+### Changed
+- Add npm version and license badges to README.
+- First release published via the GitHub Actions trusted-publisher workflow (provenance attestation included).
+
 ## [0.1.0] — 2026-05-17
 
 Initial release. Trimmed-down fork of
@@ -30,5 +36,6 @@ on context discipline.
   drive `navigateTree` from a tool call. Goes away once pi exposes a public
   `runWhenIdle()` API (upstream tracking issue: earendil-works/pi#2023).
 
-[Unreleased]: https://github.com/ersintarhan/pi-auto-context/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/ersintarhan/pi-auto-context/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/ersintarhan/pi-auto-context/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/ersintarhan/pi-auto-context/releases/tag/v0.1.0
