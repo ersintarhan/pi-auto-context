@@ -21,13 +21,16 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          # Node 24 ships npm 11.x which natively supports OIDC trusted
+          # publishers (added in npm 11.5.1). Older runners ship npm 10
+          # which silently falls back to token auth even with id-token: write.
+          node-version: "24"
           # Intentionally no `registry-url` — setting it makes setup-node
           # write `_authToken=${NODE_AUTH_TOKEN}` into .npmrc which forces
           # token-based auth and breaks the OIDC trusted-publisher flow.
 
-      - name: Upgrade npm to a version with OIDC trusted-publisher support
-        run: npm install -g npm@latest
+      - name: Print npm version
+        run: npm --version
 
       - name: Verify tag matches package.json version
         run: |
