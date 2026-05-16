@@ -1,0 +1,18 @@
+{
+	"name": "pi-auto-context",
+	"version": "0.1.0",
+	"description": "Automatic context management for pi sessions: anchors, pivots, and cross-session recall — with a status line and auto-truncation of stale tool results.",
+	"keywords": ["pi-package", "pi-extension", "context-management", "anchor", "pivot"],
+	"license": "MIT",
+	"repository": "github:ersin/pi-auto-context",
+	"pi": {
+		"extensions": ["./extensions"],
+		"skills": ["./skills"]
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": "*",
+		"@earendil-works/pi-agent-core": "*",
+		"@earendil-works/pi-ai": "*",
+		"typebox": "*"
+	}
+}
