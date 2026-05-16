@@ -21,8 +21,13 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
-          registry-url: "https://registry.npmjs.org"
+          node-version: "22"
+          # Intentionally no `registry-url` — setting it makes setup-node
+          # write `_authToken=${NODE_AUTH_TOKEN}` into .npmrc which forces
+          # token-based auth and breaks the OIDC trusted-publisher flow.
+
+      - name: Upgrade npm to a version with OIDC trusted-publisher support
+        run: npm install -g npm@latest
 
       - name: Verify tag matches package.json version
         run: |
@@ -34,10 +39,8 @@ jobs:
           fi
           echo "Publishing v$PKG_VERSION"
 
-      # No NPM_TOKEN — package.json publishing access is set to
-      # "disallow tokens". Authentication happens via npm's OIDC trusted
-      # publisher; the id-token permission above issues the OIDC JWT and
-      # `npm publish` exchanges it for a publish credential automatically.
+      # OIDC trusted publisher: no NPM_TOKEN. `id-token: write` permission lets
+      # npm exchange the GitHub OIDC JWT for a publish credential automatically.
       # See: https://docs.npmjs.com/trusted-publishers
       - name: Publish to npm with provenance
         run: npm publish --access public --provenance
