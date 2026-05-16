@@ -29,7 +29,7 @@ Trimmed-down fork of [tshu-w/pi-control](https://github.com/tshu-w/pi-control) f
 ## Install
 
 ```bash
-pi install git:github.com/ersin/pi-auto-context
+pi install @ersintarhan/pi-auto-context
 ```
 
 ## Heads-up: private API hack
