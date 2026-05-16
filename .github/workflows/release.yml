@@ -1,0 +1,43 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write  # required for npm provenance + OIDC trusted publisher
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Verify tag matches package.json version
+        run: |
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::package.json version ($PKG_VERSION) does not match tag ($TAG_VERSION)"
+            exit 1
+          fi
+          echo "Publishing v$PKG_VERSION"
+
+      # No NPM_TOKEN — package.json publishing access is set to
+      # "disallow tokens". Authentication happens via npm's OIDC trusted
+      # publisher; the id-token permission above issues the OIDC JWT and
+      # `npm publish` exchanges it for a publish credential automatically.
+      # See: https://docs.npmjs.com/trusted-publishers
+      - name: Publish to npm with provenance
+        run: npm publish --access public --provenance
