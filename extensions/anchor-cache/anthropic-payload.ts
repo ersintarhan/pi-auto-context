@@ -39,6 +39,22 @@ export interface AnthropicPayload {
 }
 
 /**
+ * Defensive purge of any leftover `_anchorCacheOwner` fields that 0.2.0 may
+ * have stamped onto blocks. Anthropic's API strictly rejects unknown fields
+ * ("Extra inputs are not permitted"). Idempotent.
+ *
+ * 0.2.0 wrote the owner tag directly onto the block, which works locally but
+ * Anthropic validates the payload server-side. 0.2.1 moved to a WeakMap, but
+ * resumed sessions or replayed payloads may still carry the stale field.
+ */
+export function purgeLegacyOwnerFields(payload: AnthropicPayload): void {
+	const strip = (b: any) => { if (b && typeof b === "object" && "_anchorCacheOwner" in b) delete b._anchorCacheOwner; };
+	payload.system?.forEach(strip);
+	payload.tools?.forEach(strip);
+	payload.messages?.forEach(m => Array.isArray(m.content) && m.content.forEach(strip));
+}
+
+/**
  * Structural check: is this an Anthropic Messages API payload?
  *
  * We require `messages` array AND either `system` or `tools` to be present —
@@ -82,18 +98,41 @@ export interface MarkerRef {
 	owner?: string;
 }
 
+/**
+ * Ownership tracking lives in a WeakMap, NOT on the block itself.
+ *
+ * Anthropic's API strictly validates the payload schema and rejects any extra
+ * field on tool_result / text / tool_use blocks (e.g. `_anchorCacheOwner: Extra
+ * inputs are not permitted`). Tagging via WeakMap keeps the block shape pure
+ * and is naturally scoped to the current request — the next call gets a fresh
+ * payload from pi-ai so we never accumulate stale tags.
+ */
+const MARKER_OWNERS = new WeakMap<object, string>();
+
+function getOwner(block: unknown): string | undefined {
+	return typeof block === "object" && block !== null ? MARKER_OWNERS.get(block) : undefined;
+}
+
+function setOwner(block: unknown, owner: string): void {
+	if (typeof block === "object" && block !== null) MARKER_OWNERS.set(block, owner);
+}
+
+function clearOwner(block: unknown): void {
+	if (typeof block === "object" && block !== null) MARKER_OWNERS.delete(block);
+}
+
 export function listMarkers(payload: AnthropicPayload): MarkerRef[] {
 	const out: MarkerRef[] = [];
 	if (payload.system) {
 		for (let i = 0; i < payload.system.length; i++) {
 			const b = payload.system[i];
-			if (b?.cache_control) out.push({ section: "system", idx: i, control: b.cache_control, owner: (b as any)._anchorCacheOwner });
+			if (b?.cache_control) out.push({ section: "system", idx: i, control: b.cache_control, owner: getOwner(b) });
 		}
 	}
 	if (payload.tools) {
 		for (let i = 0; i < payload.tools.length; i++) {
 			const t = payload.tools[i];
-			if (t?.cache_control) out.push({ section: "tools", idx: i, control: t.cache_control, owner: (t as any)._anchorCacheOwner });
+			if (t?.cache_control) out.push({ section: "tools", idx: i, control: t.cache_control, owner: getOwner(t) });
 		}
 	}
 	if (payload.messages) {
@@ -102,7 +141,7 @@ export function listMarkers(payload: AnthropicPayload): MarkerRef[] {
 			if (!Array.isArray(m.content)) continue;
 			for (let j = 0; j < m.content.length; j++) {
 				const block = m.content[j];
-				if (block?.cache_control) out.push({ section: "messages", idx: i, blockIdx: j, control: block.cache_control, owner: block._anchorCacheOwner });
+				if (block?.cache_control) out.push({ section: "messages", idx: i, blockIdx: j, control: block.cache_control, owner: getOwner(block) });
 			}
 		}
 	}
@@ -148,7 +187,7 @@ export function setMessageMarker(
 	const target = block[blockIdx];
 	if (!target) return;
 	target.cache_control = control;
-	target._anchorCacheOwner = owner;
+	setOwner(target, owner);
 }
 
 export function dropMessageMarker(payload: AnthropicPayload, msgIdx: number, blockIdx: number): void {
@@ -157,21 +196,21 @@ export function dropMessageMarker(payload: AnthropicPayload, msgIdx: number, blo
 	const target = block[blockIdx];
 	if (!target) return;
 	delete target.cache_control;
-	delete target._anchorCacheOwner;
+	clearOwner(target);
 }
 
 export function dropSystemMarker(payload: AnthropicPayload, idx: number): void {
 	const b = payload.system?.[idx];
 	if (!b) return;
 	delete b.cache_control;
-	delete (b as any)._anchorCacheOwner;
+	clearOwner(b);
 }
 
 export function dropToolsMarker(payload: AnthropicPayload, idx: number): void {
 	const t = payload.tools?.[idx];
 	if (!t) return;
 	delete t.cache_control;
-	delete (t as any)._anchorCacheOwner;
+	clearOwner(t);
 }
 
 /**

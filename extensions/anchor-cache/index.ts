@@ -54,6 +54,7 @@ import {
 	dropMessageMarker,
 	listMarkers,
 	enforceMarkerLimit,
+	purgeLegacyOwnerFields,
 	type AnthropicPayload,
 	type CacheControl,
 } from "./anthropic-payload.js";
@@ -68,6 +69,10 @@ export default function (pi: ExtensionAPI) {
 	pi.on("before_provider_request", async (event, ctx) => {
 		const payload = event.payload as unknown;
 		if (!isAnthropicPayload(payload)) return; // not Anthropic — no-op
+
+		// Strip any stray _anchorCacheOwner fields left over from 0.2.0. Anthropic's
+		// API rejects unknown fields on tool_result / text / tool_use blocks.
+		purgeLegacyOwnerFields(payload);
 
 		// Find on-branch anchor toolResult entries (oldest → newest). We need
 		// toolCallId from the AgentMessage to look up the tool_use_id inside

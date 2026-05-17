@@ -6,6 +6,11 @@ All notable changes to this project are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-05-17
+
+### Fixed
+- **anchor-cache 400 error on Anthropic.** 0.2.0 stamped an `_anchorCacheOwner` field directly onto payload blocks for ownership tracking; Anthropic's API strictly validates the schema and rejected it with `Extra inputs are not permitted`. Ownership now lives in a `WeakMap<block, owner>` outside the payload, keeping the wire format pure. Includes a defensive `purgeLegacyOwnerFields()` pass that strips stale tags from resumed-session payloads.
+
 ## [0.2.0] — 2026-05-17
 
 ### Added
@@ -51,7 +56,8 @@ on context discipline.
   drive `navigateTree` from a tool call. Goes away once pi exposes a public
   `runWhenIdle()` API (upstream tracking issue: earendil-works/pi#2023).
 
-[Unreleased]: https://github.com/ersintarhan/pi-auto-context/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/ersintarhan/pi-auto-context/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/ersintarhan/pi-auto-context/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/ersintarhan/pi-auto-context/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/ersintarhan/pi-auto-context/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/ersintarhan/pi-auto-context/releases/tag/v0.1.0
