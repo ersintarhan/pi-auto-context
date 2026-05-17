@@ -6,6 +6,16 @@ All notable changes to this project are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.2.2] — 2026-05-17
+
+### Fixed
+- **400 "A maximum of 4 blocks with cache_control may be provided"** when `@mcowger/pi-better-messages-cache` was also installed. pi-auto-context loads alphabetically before better-cache, so we added our anchor marker first, then better-cache pushed the count to 5. New strategy never adds a marker — we **shift** the existing rolling message-level marker (`last_user`) onto the anchor block. Net marker count is unchanged.
+- **400 "a ttl='1h' cache_control block must not come after a ttl='5m' cache_control block"**. Anthropic processes blocks in `tools → system → messages` order and requires 1h markers to precede 5m markers. Our anchor lives in `messages`, while upstream `tools/system` markers default to 5m — putting 1h on the anchor was always invalid. Anchor TTL is now **5m**, matching upstream.
+
+### Changed
+- Removed `mid_anchor` and the aggressive/safe-shift mode switch. The new layout is uniform: drop existing message-level markers, install **one** `last_anchor` marker at 5m. Simpler, ordering-correct, marker-budget-safe.
+- Cache win comes from the marker being on a **stable block** (the anchor never moves) rather than the rolling `last_user` target that auto-truncation invalidates every turn.
+
 ## [0.2.1] — 2026-05-17
 
 ### Fixed
@@ -56,7 +66,8 @@ on context discipline.
   drive `navigateTree` from a tool call. Goes away once pi exposes a public
   `runWhenIdle()` API (upstream tracking issue: earendil-works/pi#2023).
 
-[Unreleased]: https://github.com/ersintarhan/pi-auto-context/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/ersintarhan/pi-auto-context/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/ersintarhan/pi-auto-context/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/ersintarhan/pi-auto-context/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/ersintarhan/pi-auto-context/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/ersintarhan/pi-auto-context/compare/v0.1.0...v0.1.1

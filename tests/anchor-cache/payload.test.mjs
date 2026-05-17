@@ -88,10 +88,20 @@ t("oauth has 2 system + 1 message marker", () => {
 console.log("# setMessageMarker + listMarkers ownership");
 t("our marker is tagged with owner", () => {
 	const p = nativePayload();
-	setMessageMarker(p, 2, 0, { type: "ephemeral", ttl: "1h" }, "last_anchor");
+	setMessageMarker(p, 2, 0, { type: "ephemeral", ttl: "5m" }, "last_anchor");
 	const m = listMarkers(p).find(x => x.section === "messages" && x.idx === 2);
 	eq(m.owner, "last_anchor");
-	eq(m.control.ttl, "1h");
+	eq(m.control.ttl, "5m");
+});
+
+t("owner tag is NOT written to the payload block (Anthropic schema strict)", () => {
+	const p = nativePayload();
+	setMessageMarker(p, 2, 0, { type: "ephemeral", ttl: "5m" }, "last_anchor");
+	const block = p.messages[2].content[0];
+	if ("_anchorCacheOwner" in block) throw new Error("_anchorCacheOwner leaked onto payload block");
+	// JSON-serialize round-trip: ownership must survive ONLY on the original object reference (WeakMap)
+	const serialized = JSON.stringify(p);
+	if (serialized.includes("_anchorCacheOwner")) throw new Error("_anchorCacheOwner appears in serialized payload");
 });
 
 console.log("# enforceMarkerLimit");
@@ -133,9 +143,9 @@ t("over limit + only own markers: keeps last_anchor, drops mid_anchor first", ()
 	p.messages.push({ role: "user", content: [{ type: "tool_result", tool_use_id: "tu3", content: "y" }] });
 	p.messages.push({ role: "user", content: [{ type: "tool_result", tool_use_id: "tu4", content: "z" }] });
 	p.messages.push({ role: "user", content: [{ type: "tool_result", tool_use_id: "tu5", content: "w" }] });
-	setMessageMarker(p, 2, 0, { type: "ephemeral", ttl: "1h" }, "mid_anchor");
-	setMessageMarker(p, 4, 0, { type: "ephemeral", ttl: "1h" }, "mid_anchor");
-	setMessageMarker(p, 5, 0, { type: "ephemeral", ttl: "1h" }, "last_anchor");
+	setMessageMarker(p, 2, 0, { type: "ephemeral", ttl: "5m" }, "mid_anchor");
+	setMessageMarker(p, 4, 0, { type: "ephemeral", ttl: "5m" }, "mid_anchor");
+	setMessageMarker(p, 5, 0, { type: "ephemeral", ttl: "5m" }, "last_anchor");
 	// 3 our markers, all own. enforce(2) should drop oldest mid_anchor.
 	const dropped = enforceMarkerLimit(p, 2);
 	const after = listMarkers(p);
