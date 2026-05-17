@@ -18,12 +18,17 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { patchBindCommandContext, runPending, clearPending, isArmed, hasPending, getActivePivot } from "./command-actions.js";
 import { isAnchorEntry, isAnchorToolResult } from "./context/anchors.js";
 import { registerContextRouter } from "./context/router.js";
+import registerAnchorCache from "./anchor-cache/index.js";
 
 export default function (pi: ExtensionAPI) {
 	// Patch ExtensionRunner to auto-capture command context actions.
 	const patchOk = patchBindCommandContext();
 
 	registerContextRouter(pi);
+
+	// Anchor-aware Anthropic prompt-cache breakpoint optimization.
+	// No-ops on non-Anthropic providers; idempotent w.r.t. pi-better-messages-cache.
+	registerAnchorCache(pi);
 
 	// ── Context event: truncate old tool results + status line + anchor reminder ──
 	// Receives AgentMessage[]. Anchors are toolResults with toolName=="context" and details.anchor.

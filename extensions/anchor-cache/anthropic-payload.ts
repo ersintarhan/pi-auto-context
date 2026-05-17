@@ -1,0 +1,218 @@
+/**
+ * Anthropic Messages API payload introspection + cache_control patching.
+ *
+ * Payload shape (what pi-ai's anthropic provider builds, see
+ * @earendil-works/pi-ai/dist/providers/anthropic.js):
+ *
+ *   {
+ *     model: string,
+ *     system?: Array<{ type: "text", text: string, cache_control?: {...} }>,
+ *     tools?: Array<{ name, description, input_schema, cache_control?: {...} }>,
+ *     messages: Array<{
+ *       role: "user" | "assistant",
+ *       content: string | Array<TextBlock | ToolUseBlock | ToolResultBlock | ImageBlock>
+ *     }>,
+ *     ...
+ *   }
+ *
+ * Cache_control marker budget is 4 per request (Anthropic hard limit; 5+ → 400).
+ * Lookback window is 20 blocks per breakpoint, counted across tools+system+messages.
+ *
+ * We treat the payload as a tagged union by structural duck-typing; we never
+ * import @earendil-works/pi-ai types because that pulls in a hard peer dep
+ * for an extension that should no-op on non-anthropic providers.
+ */
+
+export interface CacheControl {
+	type: "ephemeral";
+	ttl?: "5m" | "1h";
+}
+
+export interface AnthropicPayload {
+	model?: string;
+	system?: Array<{ type: string; text?: string; cache_control?: CacheControl }>;
+	tools?: Array<{ name?: string; cache_control?: CacheControl }>;
+	messages?: Array<{
+		role: "user" | "assistant";
+		content: string | Array<any>;
+	}>;
+}
+
+/**
+ * Structural check: is this an Anthropic Messages API payload?
+ *
+ * We require `messages` array AND either `system` or `tools` to be present —
+ * OpenAI's chat/completions payload also has `messages` but differs in the
+ * `tools` shape (function wrapper) and lacks the top-level `system` field.
+ */
+export function isAnthropicPayload(payload: unknown): payload is AnthropicPayload {
+	if (!payload || typeof payload !== "object") return false;
+	const p = payload as any;
+	if (!Array.isArray(p.messages)) return false;
+	// system: array of {type:"text", text} — OpenAI uses a message with role="system" inside `messages`
+	if (Array.isArray(p.system) && p.system.length > 0) {
+		const first = p.system[0];
+		if (first && typeof first === "object" && first.type === "text") return true;
+	}
+	// tools: Anthropic tools have `input_schema` at top level, OpenAI wraps in `function`
+	if (Array.isArray(p.tools) && p.tools.length > 0) {
+		const first = p.tools[0];
+		if (first && typeof first === "object" && "input_schema" in first) return true;
+	}
+	return false;
+}
+
+/** Count blocks in `system` + `tools`; used for lookback-budget decisions. */
+export function countPrefixBlocks(payload: AnthropicPayload): { system: number; tools: number } {
+	return {
+		system: payload.system?.length ?? 0,
+		tools: payload.tools?.length ?? 0,
+	};
+}
+
+/** Return all cache_control markers in the payload, in render order (system → tools → messages). */
+export interface MarkerRef {
+	section: "system" | "tools" | "messages";
+	/** Index within its containing array. For messages, this is the message index. */
+	idx: number;
+	/** For messages: index of the block inside content[] that carries the marker. */
+	blockIdx?: number;
+	control: CacheControl;
+	/** Free-form tag we set when we own the marker so we can preserve it. */
+	owner?: string;
+}
+
+export function listMarkers(payload: AnthropicPayload): MarkerRef[] {
+	const out: MarkerRef[] = [];
+	if (payload.system) {
+		for (let i = 0; i < payload.system.length; i++) {
+			const b = payload.system[i];
+			if (b?.cache_control) out.push({ section: "system", idx: i, control: b.cache_control, owner: (b as any)._anchorCacheOwner });
+		}
+	}
+	if (payload.tools) {
+		for (let i = 0; i < payload.tools.length; i++) {
+			const t = payload.tools[i];
+			if (t?.cache_control) out.push({ section: "tools", idx: i, control: t.cache_control, owner: (t as any)._anchorCacheOwner });
+		}
+	}
+	if (payload.messages) {
+		for (let i = 0; i < payload.messages.length; i++) {
+			const m = payload.messages[i];
+			if (!Array.isArray(m.content)) continue;
+			for (let j = 0; j < m.content.length; j++) {
+				const block = m.content[j];
+				if (block?.cache_control) out.push({ section: "messages", idx: i, blockIdx: j, control: block.cache_control, owner: block._anchorCacheOwner });
+			}
+		}
+	}
+	return out;
+}
+
+/**
+ * Find the message + block within `payload.messages` that contains a tool_result
+ * with the given tool_use_id. Returns null if not found.
+ *
+ * The Anthropic provider packs consecutive toolResult AgentMessages into a single
+ * user message with content=[tool_result, tool_result, ...], so we must scan
+ * each block, not just per-message.
+ */
+export function findToolResultBlock(
+	payload: AnthropicPayload,
+	toolUseId: string,
+): { msgIdx: number; blockIdx: number } | null {
+	if (!payload.messages) return null;
+	for (let i = 0; i < payload.messages.length; i++) {
+		const m = payload.messages[i];
+		if (m.role !== "user" || !Array.isArray(m.content)) continue;
+		for (let j = 0; j < m.content.length; j++) {
+			const block = m.content[j];
+			if (block?.type === "tool_result" && block?.tool_use_id === toolUseId) {
+				return { msgIdx: i, blockIdx: j };
+			}
+		}
+	}
+	return null;
+}
+
+/** Apply cache_control to a specific block; tag with owner so listMarkers can identify it later. */
+export function setMessageMarker(
+	payload: AnthropicPayload,
+	msgIdx: number,
+	blockIdx: number,
+	control: CacheControl,
+	owner: string,
+): void {
+	const block = payload.messages?.[msgIdx]?.content as any[] | undefined;
+	if (!block) return;
+	const target = block[blockIdx];
+	if (!target) return;
+	target.cache_control = control;
+	target._anchorCacheOwner = owner;
+}
+
+export function dropMessageMarker(payload: AnthropicPayload, msgIdx: number, blockIdx: number): void {
+	const block = payload.messages?.[msgIdx]?.content as any[] | undefined;
+	if (!block) return;
+	const target = block[blockIdx];
+	if (!target) return;
+	delete target.cache_control;
+	delete target._anchorCacheOwner;
+}
+
+export function dropSystemMarker(payload: AnthropicPayload, idx: number): void {
+	const b = payload.system?.[idx];
+	if (!b) return;
+	delete b.cache_control;
+	delete (b as any)._anchorCacheOwner;
+}
+
+export function dropToolsMarker(payload: AnthropicPayload, idx: number): void {
+	const t = payload.tools?.[idx];
+	if (!t) return;
+	delete t.cache_control;
+	delete (t as any)._anchorCacheOwner;
+}
+
+/**
+ * Enforce the 4-marker hard limit. Eviction priority (drop first → drop last):
+ *   1. message-level markers NOT owned by us (built-in / better-cache rolling)
+ *   2. tools markers NOT owned by us
+ *   3. system markers NOT owned by us
+ *   4. our own markers (last_anchor, mid_anchor) — protected
+ *
+ * Within each tier, drop from the OLDEST first (lowest section index, lowest block idx).
+ * Returns the number of markers dropped.
+ */
+export function enforceMarkerLimit(payload: AnthropicPayload, max = 4): number {
+	let markers = listMarkers(payload);
+	let dropped = 0;
+	while (markers.length > max) {
+		const candidate = pickEvictionTarget(markers);
+		if (!candidate) break; // all protected — give up; Anthropic will 400 but we don't lose anchor cache
+		switch (candidate.section) {
+			case "messages": dropMessageMarker(payload, candidate.idx, candidate.blockIdx!); break;
+			case "tools":    dropToolsMarker(payload, candidate.idx); break;
+			case "system":   dropSystemMarker(payload, candidate.idx); break;
+		}
+		dropped++;
+		markers = listMarkers(payload);
+	}
+	return dropped;
+}
+
+function pickEvictionTarget(markers: MarkerRef[]): MarkerRef | null {
+	// tier 1: foreign message markers, oldest first
+	const foreignMessages = markers.filter(m => m.section === "messages" && !m.owner);
+	if (foreignMessages.length > 0) return foreignMessages[0];
+	// tier 2: foreign tools markers
+	const foreignTools = markers.filter(m => m.section === "tools" && !m.owner);
+	if (foreignTools.length > 0) return foreignTools[0];
+	// tier 3: foreign system markers
+	const foreignSystem = markers.filter(m => m.section === "system" && !m.owner);
+	if (foreignSystem.length > 0) return foreignSystem[0];
+	// tier 4: even our own — last resort, drop the OLDEST anchor (mid_anchor before last_anchor)
+	const ownAnchors = markers.filter(m => m.section === "messages" && m.owner === "mid_anchor");
+	if (ownAnchors.length > 0) return ownAnchors[0];
+	return null;
+}

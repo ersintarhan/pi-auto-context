@@ -6,6 +6,21 @@ All notable changes to this project are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-05-17
+
+### Added
+- **Anchor-aware Anthropic prompt-cache breakpoint optimization** — attaches a `cache_control` marker with 1-hour TTL to the last on-branch anchor's `tool_result` block via `before_provider_request` hook. Solves the cost regression caused by auto-truncation invalidating the rolling `last_user` marker.
+- Two operating modes selected automatically:
+  - **aggressive** (`system + tools ≤ 17` blocks): drops the built-in system marker, installs `mid_anchor` + `last_anchor` for two-tier cache hits.
+  - **safe-shift** (`system + tools > 17` blocks): keeps the system marker, installs `last_anchor` only.
+- Coexists with `@mcowger/pi-better-messages-cache`: 4-marker enforcement evicts foreign markers first, our anchor markers are protected.
+- Recognizes OAuth (Claude Code) payloads by structural check; billing-header block stays intact.
+- `PI_ANCHOR_CACHE_DEBUG=1` env var prints chosen mode and final marker layout per request.
+
+### Internal
+- New `extensions/anchor-cache/` sub-extension registered from the main `index.ts` factory.
+- 14 unit tests for payload manipulation in `tests/anchor-cache/payload.test.mjs` (excluded from npm tarball).
+
 ## [0.1.1] — 2026-05-17
 
 ### Changed
@@ -36,6 +51,7 @@ on context discipline.
   drive `navigateTree` from a tool call. Goes away once pi exposes a public
   `runWhenIdle()` API (upstream tracking issue: earendil-works/pi#2023).
 
-[Unreleased]: https://github.com/ersintarhan/pi-auto-context/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/ersintarhan/pi-auto-context/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/ersintarhan/pi-auto-context/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/ersintarhan/pi-auto-context/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/ersintarhan/pi-auto-context/releases/tag/v0.1.0
