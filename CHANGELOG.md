@@ -6,6 +6,13 @@ All notable changes to this project are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.2.5] — 2026-05-17
+
+### Changed
+- **Anchor TTL reverted to 5m by default.** pi-claude-oauth-adapter loads alphabetically after pi-auto-context and injects system blocks with cache_control in its own `before_provider_request` hook. This runs AFTER our hook, so we can't upgrade or enforce against its markers. If we set 1h and the adapter injects 5m, Anthropic's TTL-ordering rule rejects the request (`ttl='1h' must not come after ttl='5m'`). With 5m everywhere, any post-hook injection is valid.
+- The cache win comes from marker **stability** (anchor never moves between turns), not TTL length. 5m auto-refreshes on every cache hit, so the prefix stays warm indefinitely as long as turns come within 5 minutes.
+- `upgradePrefixMarkersTo1h` and provider-detection removed from default path. Only activated via opt-in `PI_ANCHOR_CACHE_TTL=1h` env var.
+
 ## [0.2.4] — 2026-05-17
 
 ### Fixed
@@ -91,7 +98,8 @@ on context discipline.
   drive `navigateTree` from a tool call. Goes away once pi exposes a public
   `runWhenIdle()` API (upstream tracking issue: earendil-works/pi#2023).
 
-[Unreleased]: https://github.com/ersintarhan/pi-auto-context/compare/v0.2.4...HEAD
+[Unreleased]: https://github.com/ersintarhan/pi-auto-context/compare/v0.2.5...HEAD
+[0.2.5]: https://github.com/ersintarhan/pi-auto-context/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/ersintarhan/pi-auto-context/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/ersintarhan/pi-auto-context/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/ersintarhan/pi-auto-context/compare/v0.2.1...v0.2.2

@@ -59,24 +59,29 @@ import {
 import { isAnchorEntry } from "../context/anchors.js";
 
 /**
- * Anchor TTL. Default 1h — anchors are semantic boundaries that persist by
- * definition, so a long TTL pays off even with the 2x write cost (1h cache
- * writes are 2x base, vs 1.25x for 5m, but reads stay at 0.1x). On idle gaps
- * >5min the 1h marker keeps the prefix alive where 5m would drop it.
+ * Anchor TTL is always 5m.
  *
- * Override via env: `PI_ANCHOR_CACHE_TTL=5m` to force shorter TTL.
+ * Reason: pi's hook chain is ordered by extension load order (alphabetical).
+ * pi-claude-oauth-adapter loads AFTER pi-auto-context and may inject new
+ * system blocks with cache_control copied from existing markers. Even if we
+ * upgrade all prefix markers to 1h, the oauth adapter runs later and can
+ * inject a 5m marker on a new system block, producing the invalid sequence
+ * tools(1h) → system(1h) → oauth-injected-system(5m) → messages(anchor 1h).
  *
- * Anthropic's TTL-ordering rule: longer TTLs must come first in payload order
- * (tools → system → messages). When we install a 1h anchor in `messages`, we
- * must also UPGRADE any pre-existing tools/system markers to 1h — leaving
- * them at 5m would produce 'ttl=1h must not come after ttl=5m'. We do not
- * touch message-level markers AFTER the anchor (rolling last_user /
- * last_tool_use); 5m markers after a 1h marker are valid.
+ * With 5m everywhere, any post-hook injection is always valid: 5m after 5m
+ * is fine regardless of position.
+ *
+ * The cache win comes from marker STABILITY (anchor never moves between
+ * turns), not from TTL length. 5m auto-refreshes on every cache hit, so
+ * as long as turns come within 5 minutes the prefix stays warm indefinitely.
+ *
+ * Override: PI_ANCHOR_CACHE_TTL=1h (at your own risk — only safe when no
+ * other extension injects markers after this hook).
  */
 function resolveAnchorTTL(): "5m" | "1h" {
 	const env = process.env.PI_ANCHOR_CACHE_TTL;
-	if (env === "5m" || env === "1h") return env;
-	return "1h";
+	if (env === "1h") return "1h";
+	return "5m";
 }
 
 export default function (pi: ExtensionAPI) {
@@ -125,10 +130,8 @@ export default function (pi: ExtensionAPI) {
 			droppedPreAnchor++;
 		}
 
-		// Upgrade tools+system markers to match anchor TTL when going 1h, otherwise
-		// the ordering rule rejects the request (1h in messages cannot follow 5m
-		// in tools/system). For 5m anchor this is a no-op since upstream is
-		// already 5m (or longer).
+		// When using 1h (opt-in only), upgrade tools+system markers to match.
+		// Safe default is 5m — no upgrade needed, any post-hook injection is valid.
 		if (anchorTTL === "1h") {
 			upgradePrefixMarkersTo1h(payload);
 		}
