@@ -6,6 +6,21 @@ All notable changes to this project are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.2.4] — 2026-05-17
+
+### Fixed
+- **400 'A maximum of 4 blocks with cache_control may be provided. Found 5.'** when `@mcowger/pi-better-messages-cache` is enabled. Our `listMarkers()` only inspected known block shapes (top-level system/tools blocks and direct message content blocks) and silently undercounted when an upstream extension placed a marker in a shape we didn't recognize (e.g. an OAuth identity system block whose marker we missed in the listing path). We'd hit the 4-limit check thinking we had 4 markers and pass through with 5.
+
+### Changed
+- New `countMarkersRaw(payload)` helper does a full recursive JSON walk and counts every `cache_control` field reachable from the payload root. This is the ground-truth count Anthropic's server-side validator sees.
+- `enforceMarkerLimit()` now runs in two phases:
+  - Phase 1: structured eviction via `listMarkers` + ownership tiers (unchanged).
+  - Phase 2: brute-force fallback against `countMarkersRaw` — if the raw count still exceeds the limit after Phase 1, walk the payload in Anthropic processing order (messages newest-first → tools → system) and delete the first foreign marker found, including ones nested inside `tool_result.content` arrays.
+- Debug log adds `raw=<n>` field and prints `⚠️ MISMATCH raw=X listed=Y` when the two counts diverge, exposing future shape-coverage bugs immediately.
+
+### Tests
+- 2 new tests cover the brute-force fallback and the count-mismatch detection. 17 tests pass total.
+
 ## [0.2.3] — 2026-05-17
 
 ### Changed
@@ -76,7 +91,8 @@ on context discipline.
   drive `navigateTree` from a tool call. Goes away once pi exposes a public
   `runWhenIdle()` API (upstream tracking issue: earendil-works/pi#2023).
 
-[Unreleased]: https://github.com/ersintarhan/pi-auto-context/compare/v0.2.3...HEAD
+[Unreleased]: https://github.com/ersintarhan/pi-auto-context/compare/v0.2.4...HEAD
+[0.2.4]: https://github.com/ersintarhan/pi-auto-context/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/ersintarhan/pi-auto-context/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/ersintarhan/pi-auto-context/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/ersintarhan/pi-auto-context/compare/v0.2.0...v0.2.1

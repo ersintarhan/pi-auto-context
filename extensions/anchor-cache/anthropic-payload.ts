@@ -214,21 +214,55 @@ export function dropToolsMarker(payload: AnthropicPayload, idx: number): void {
 }
 
 /**
- * Enforce the 4-marker hard limit. Eviction priority (drop first → drop last):
- *   1. message-level markers NOT owned by us (built-in / better-cache rolling)
+ * Ground-truth marker count via JSON traversal. Counts every `cache_control`
+ * field reachable from the payload root, regardless of nesting depth or block
+ * shape. This is the number Anthropic's server-side validator sees.
+ *
+ * We use this instead of trusting listMarkers() for the 4-limit check, because
+ * listMarkers() only inspects known block shapes (top-level system/tools blocks,
+ * direct message content blocks) and can undercount when an upstream extension
+ * places markers in unexpected positions.
+ */
+export function countMarkersRaw(payload: AnthropicPayload): number {
+	let count = 0;
+	const visit = (node: any): void => {
+		if (!node || typeof node !== "object") return;
+		if (Array.isArray(node)) { for (const x of node) visit(x); return; }
+		for (const [k, v] of Object.entries(node)) {
+			if (k === "cache_control" && v && typeof v === "object") count++;
+			else if (k !== "cache_control") visit(v);
+		}
+	};
+	visit(payload);
+	return count;
+}
+
+/**
+ * Enforce the 4-marker hard limit using GROUND-TRUTH JSON count, not listMarkers.
+ *
+ * Phase 1 (preferred): use listMarkers + structured eviction tiers:
+ *   1. message-level markers NOT owned by us (rolling foreign markers)
  *   2. tools markers NOT owned by us
  *   3. system markers NOT owned by us
- *   4. our own markers (last_anchor, mid_anchor) — protected
+ *   4. our own markers (last_anchor) — protected as last resort
  *
- * Within each tier, drop from the OLDEST first (lowest section index, lowest block idx).
+ * Phase 2 (fallback): if raw JSON count still > max after Phase 1 exhausted,
+ * we have a marker in a shape listMarkers doesn't recognize. Walk the payload
+ * and brute-force delete the first non-owned cache_control we find, scanning
+ * sections in order: messages → tools → system (matches Anthropic processing
+ * order, so we drop the latest/rolling markers first while preserving the
+ * cacheable static prefix).
+ *
  * Returns the number of markers dropped.
  */
 export function enforceMarkerLimit(payload: AnthropicPayload, max = 4): number {
-	let markers = listMarkers(payload);
 	let dropped = 0;
+
+	// Phase 1: structured eviction
+	let markers = listMarkers(payload);
 	while (markers.length > max) {
 		const candidate = pickEvictionTarget(markers);
-		if (!candidate) break; // all protected — give up; Anthropic will 400 but we don't lose anchor cache
+		if (!candidate) break;
 		switch (candidate.section) {
 			case "messages": dropMessageMarker(payload, candidate.idx, candidate.blockIdx!); break;
 			case "tools":    dropToolsMarker(payload, candidate.idx); break;
@@ -237,8 +271,55 @@ export function enforceMarkerLimit(payload: AnthropicPayload, max = 4): number {
 		dropped++;
 		markers = listMarkers(payload);
 	}
+
+	// Phase 2: brute-force fallback against ground-truth JSON count. Catches
+	// markers in shapes listMarkers doesn't recognize (e.g. upstream extensions
+	// stamping markers on nested blocks).
+	while (countMarkersRaw(payload) > max) {
+		const removed = bruteForceDropForeignMarker(payload);
+		if (!removed) break; // only our own markers remain, can't drop more without losing anchor cache
+		dropped++;
+	}
+
 	return dropped;
 }
+
+/**
+ * Walk the payload and delete the first cache_control marker we find that is
+ * not owned by us. Sections scanned in Anthropic processing order so we drop
+ * later (rolling) markers before earlier (stable prefix) markers when foreign:
+ * messages → tools → system. Returns true if a marker was dropped.
+ */
+function bruteForceDropForeignMarker(payload: AnthropicPayload): boolean {
+	const tryDrop = (containerArrays: any[][]): boolean => {
+		for (const arr of containerArrays) {
+			for (const block of arr) {
+				if (!block || typeof block !== "object") continue;
+				if (block.cache_control && getOwner(block) === undefined) {
+					delete block.cache_control;
+					return true;
+				}
+				// Recurse into known content arrays (message.content, tool_result.content)
+				if (Array.isArray(block.content) && tryDrop([block.content])) return true;
+			}
+		}
+		return false;
+	};
+
+	// messages first (newest → oldest), then tools, then system
+	if (payload.messages) {
+		for (let i = payload.messages.length - 1; i >= 0; i--) {
+			const m = payload.messages[i];
+			if (Array.isArray(m.content) && tryDrop([m.content])) return true;
+		}
+	}
+	if (payload.tools && tryDrop([payload.tools])) return true;
+	if (payload.system && tryDrop([payload.system])) return true;
+
+	return false;
+}
+
+
 
 function pickEvictionTarget(markers: MarkerRef[]): MarkerRef | null {
 	// tier 1: foreign message markers, oldest first

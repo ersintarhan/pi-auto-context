@@ -51,6 +51,7 @@ import {
 	dropMessageMarker,
 	listMarkers,
 	enforceMarkerLimit,
+	countMarkersRaw,
 	purgeLegacyOwnerFields,
 	type AnthropicPayload,
 	type CacheControl,
@@ -146,9 +147,11 @@ export default function (pi: ExtensionAPI) {
 				`${m.owner ? `=${m.owner}` : ""}` +
 				`${m.control.ttl ? `(${m.control.ttl})` : "(5m)"}`
 			);
+			const rawCount = countMarkersRaw(payload);
+			const mismatch = rawCount !== finalMarkers.length ? ` ⚠️ MISMATCH raw=${rawCount} listed=${finalMarkers.length}` : "";
 			console.error(
 				`[anchor-cache] ttl=${anchorTTL} anchor=msg${anchorLoc.msgIdx}[${anchorLoc.blockIdx}] ` +
-				`dropped-pre=${droppedPreAnchor} dropped-by-limit=${droppedByLimit} ` +
+				`dropped-pre=${droppedPreAnchor} dropped-by-limit=${droppedByLimit} raw=${rawCount}${mismatch} ` +
 				`final=[${finalMarkers.join(", ")}]`
 			);
 		}

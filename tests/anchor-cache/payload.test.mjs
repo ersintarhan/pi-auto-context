@@ -10,7 +10,7 @@ const mod = await j.import("../../extensions/anchor-cache/anthropic-payload.ts")
 const {
 	isAnthropicPayload, countPrefixBlocks, findToolResultBlock,
 	setMessageMarker, dropSystemMarker, dropMessageMarker,
-	listMarkers, enforceMarkerLimit,
+	listMarkers, enforceMarkerLimit, countMarkersRaw,
 } = mod;
 
 let passed = 0, failed = 0;
@@ -152,6 +152,45 @@ t("over limit + only own markers: keeps last_anchor, drops mid_anchor first", ()
 	eq(after.length, 2);
 	// last_anchor must still be there
 	if (!after.find(x => x.owner === "last_anchor")) throw new Error("last_anchor evicted under own-only limit");
+});
+
+console.log("# countMarkersRaw + Phase 2 brute-force");
+t("countMarkersRaw counts markers listMarkers misses (nested in tool_result.content)", () => {
+	const p = nativePayload();
+	// Inject a nested marker inside a tool_result.content array — listMarkers won't see it
+	p.messages.push({
+		role: "user",
+		content: [{
+			type: "tool_result",
+			tool_use_id: "nested_tu",
+			content: [{ type: "text", text: "x", cache_control: { type: "ephemeral" } }],
+		}],
+	});
+	const listed = listMarkers(p).length;
+	const raw = countMarkersRaw(p);
+	if (raw <= listed) throw new Error(`raw should exceed listed: raw=${raw} listed=${listed}`);
+});
+
+t("Phase 2 brute-force drops nested foreign marker that listMarkers misses", () => {
+	const p = nativePayload();
+	// Start: native has system + 1 message = 2 listed markers, raw also 2
+	// Add nested foreign marker inside tool_result.content — raw=3, listed=2
+	p.messages.push({
+		role: "user",
+		content: [{
+			type: "tool_result",
+			tool_use_id: "nested_tu",
+			content: [{ type: "text", text: "x", cache_control: { type: "ephemeral" } }],
+		}],
+	});
+	if (countMarkersRaw(p) !== 3) throw new Error("setup wrong");
+	// Add more markers to push raw over 4: 2 native + 1 nested + 2 more = 5
+	p.messages.push({ role: "user", content: [{ type: "text", text: "a", cache_control: { type: "ephemeral" } }] });
+	p.messages.push({ role: "user", content: [{ type: "text", text: "b", cache_control: { type: "ephemeral" } }] });
+	if (countMarkersRaw(p) !== 5) throw new Error("setup wrong total");
+	const dropped = enforceMarkerLimit(p, 4);
+	if (dropped < 1) throw new Error("expected drops");
+	if (countMarkersRaw(p) > 4) throw new Error(`enforce failed: raw still ${countMarkersRaw(p)}`);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);
