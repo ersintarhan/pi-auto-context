@@ -1,6 +1,6 @@
 {
 	"name": "@ersintarhan/pi-auto-context",
-	"version": "0.2.2",
+	"version": "0.2.3",
 	"description": "Automatic context management for pi sessions: anchors, pivots, and cross-session recall — with a status line and auto-truncation of stale tool results.",
 	"keywords": [
 		"pi",
