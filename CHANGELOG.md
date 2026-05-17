@@ -6,6 +6,16 @@ All notable changes to this project are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.2.3] — 2026-05-17
+
+### Changed
+- **Anchor TTL is now 1h by default** (was 5m). Anchors are semantic boundaries that persist by definition; a 5m TTL drops the cache during normal thinking pauses, defeating the purpose. 1h writes are 2x base vs 1.25x for 5m, but reads stay at 0.1x and amortize after ~2 reads — in practice we see 10s-100s of reads per write.
+- To satisfy Anthropic's TTL-ordering rule (longer TTLs must come first), `tools` and `system` cache_control markers are auto-upgraded from 5m to 1h whenever we install a 1h anchor. Message markers AFTER the anchor (rolling `last_user` / `last_tool_use`) stay 5m — valid since 5m can follow 1h.
+- Drop pre-anchor message markers (would violate ordering); leave post-anchor message markers alone (rolling, harmless).
+
+### Added
+- `PI_ANCHOR_CACHE_TTL` env var: set to `5m` to revert to short TTL, `1h` is the default. Debug log now prints `ttl=` and `dropped-pre=` fields.
+
 ## [0.2.2] — 2026-05-17
 
 ### Fixed
@@ -66,7 +76,8 @@ on context discipline.
   drive `navigateTree` from a tool call. Goes away once pi exposes a public
   `runWhenIdle()` API (upstream tracking issue: earendil-works/pi#2023).
 
-[Unreleased]: https://github.com/ersintarhan/pi-auto-context/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/ersintarhan/pi-auto-context/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/ersintarhan/pi-auto-context/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/ersintarhan/pi-auto-context/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/ersintarhan/pi-auto-context/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/ersintarhan/pi-auto-context/compare/v0.1.1...v0.2.0

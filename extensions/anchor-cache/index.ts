@@ -52,13 +52,31 @@ import {
 	listMarkers,
 	enforceMarkerLimit,
 	purgeLegacyOwnerFields,
+	type AnthropicPayload,
 	type CacheControl,
 } from "./anthropic-payload.js";
 import { isAnchorEntry } from "../context/anchors.js";
 
-// 5m matches what pi's core + better-cache use upstream. Mixing 1h into
-// messages while tools/system stay 5m violates Anthropic's TTL-ordering rule.
-const TTL_ANCHOR: CacheControl = { type: "ephemeral", ttl: "5m" };
+/**
+ * Anchor TTL. Default 1h — anchors are semantic boundaries that persist by
+ * definition, so a long TTL pays off even with the 2x write cost (1h cache
+ * writes are 2x base, vs 1.25x for 5m, but reads stay at 0.1x). On idle gaps
+ * >5min the 1h marker keeps the prefix alive where 5m would drop it.
+ *
+ * Override via env: `PI_ANCHOR_CACHE_TTL=5m` to force shorter TTL.
+ *
+ * Anthropic's TTL-ordering rule: longer TTLs must come first in payload order
+ * (tools → system → messages). When we install a 1h anchor in `messages`, we
+ * must also UPGRADE any pre-existing tools/system markers to 1h — leaving
+ * them at 5m would produce 'ttl=1h must not come after ttl=5m'. We do not
+ * touch message-level markers AFTER the anchor (rolling last_user /
+ * last_tool_use); 5m markers after a 1h marker are valid.
+ */
+function resolveAnchorTTL(): "5m" | "1h" {
+	const env = process.env.PI_ANCHOR_CACHE_TTL;
+	if (env === "5m" || env === "1h") return env;
+	return "1h";
+}
 
 export default function (pi: ExtensionAPI) {
 	pi.on("before_provider_request", async (event, ctx) => {
@@ -88,18 +106,34 @@ export default function (pi: ExtensionAPI) {
 			return; // anchor not in payload (truncated out?) — bail safely
 		}
 
+		const anchorTTL = resolveAnchorTTL();
+		const anchorControl: CacheControl = { type: "ephemeral", ttl: anchorTTL };
+
 		// Strategy: shift the rolling message-level marker onto the anchor block.
-		// Drop ALL existing message-level markers first so our anchor replaces
-		// (rather than adds to) the marker count. tools/system markers stay
-		// untouched — they cover upstream prefix.
+		// Drop existing message-level markers BEFORE the anchor (they'd violate
+		// TTL ordering: 5m before 1h is invalid). Leave message markers AFTER the
+		// anchor alone — 5m after 1h is valid, and those are rolling markers we
+		// don't want to interfere with.
 		const beforeMarkers = listMarkers(payload);
-		const messageMarkers = beforeMarkers.filter(m => m.section === "messages");
-		for (const m of messageMarkers) {
+		let droppedPreAnchor = 0;
+		for (const m of beforeMarkers) {
+			if (m.section !== "messages") continue;
+			if (m.idx > anchorLoc.msgIdx) continue; // post-anchor markers can stay (5m after our TTL is fine)
+			if (m.idx === anchorLoc.msgIdx && m.blockIdx! >= anchorLoc.blockIdx) continue;
 			dropMessageMarker(payload, m.idx, m.blockIdx!);
+			droppedPreAnchor++;
 		}
 
-		// Install our anchor marker (5m, owned by us).
-		setMessageMarker(payload, anchorLoc.msgIdx, anchorLoc.blockIdx, TTL_ANCHOR, "last_anchor");
+		// Upgrade tools+system markers to match anchor TTL when going 1h, otherwise
+		// the ordering rule rejects the request (1h in messages cannot follow 5m
+		// in tools/system). For 5m anchor this is a no-op since upstream is
+		// already 5m (or longer).
+		if (anchorTTL === "1h") {
+			upgradePrefixMarkersTo1h(payload);
+		}
+
+		// Install our anchor marker (owned by us).
+		setMessageMarker(payload, anchorLoc.msgIdx, anchorLoc.blockIdx, anchorControl, "last_anchor");
 
 		// Safety net: 4-marker hard limit. If another extension runs after us
 		// and pushes count over 4, this enforces; our anchor is protected,
@@ -113,12 +147,36 @@ export default function (pi: ExtensionAPI) {
 				`${m.control.ttl ? `(${m.control.ttl})` : "(5m)"}`
 			);
 			console.error(
-				`[anchor-cache] anchor=msg${anchorLoc.msgIdx}[${anchorLoc.blockIdx}] ` +
-				`shifted=${messageMarkers.length} dropped-by-limit=${droppedByLimit} ` +
+				`[anchor-cache] ttl=${anchorTTL} anchor=msg${anchorLoc.msgIdx}[${anchorLoc.blockIdx}] ` +
+				`dropped-pre=${droppedPreAnchor} dropped-by-limit=${droppedByLimit} ` +
 				`final=[${finalMarkers.join(", ")}]`
 			);
 		}
 
 		return event.payload;
 	});
+}
+
+/**
+ * Upgrade all tools+system cache_control markers to 1h. Required when we
+ * install a 1h anchor marker in `messages`, because Anthropic rejects payloads
+ * where a later block has longer TTL than an earlier one.
+ *
+ * Cost analysis: 1h writes are 2x base vs 1.25x for 5m. But tools/system are
+ * STABLE across turns — they're written once per cache-key change and then
+ * read 0.1x for every subsequent turn. 2x write amortizes after ~2 reads. In
+ * a typical session we expect 10s-100s of reads per write, so net cost
+ * decreases significantly while idle-tolerance jumps from 5min to 1h.
+ */
+function upgradePrefixMarkersTo1h(payload: AnthropicPayload): void {
+	if (payload.tools) {
+		for (const t of payload.tools) {
+			if (t.cache_control) t.cache_control = { type: "ephemeral", ttl: "1h" };
+		}
+	}
+	if (payload.system) {
+		for (const s of payload.system) {
+			if (s.cache_control) s.cache_control = { type: "ephemeral", ttl: "1h" };
+		}
+	}
 }
