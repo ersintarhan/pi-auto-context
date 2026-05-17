@@ -139,10 +139,11 @@ export default function (pi: ExtensionAPI) {
 		// Install our anchor marker (owned by us).
 		setMessageMarker(payload, anchorLoc.msgIdx, anchorLoc.blockIdx, anchorControl, "last_anchor");
 
-		// Safety net: 4-marker hard limit. If another extension runs after us
-		// and pushes count over 4, this enforces; our anchor is protected,
-		// foreign markers evict first (oldest → newest).
-		const droppedByLimit = enforceMarkerLimit(payload, 4);
+		// Safety net: enforce to 3 (not 4!) to leave budget for post-hook injections.
+		// pi-claude-oauth-adapter loads AFTER us and may inject a system block with
+		// cache_control. If we fill all 4 slots, its injection pushes to 5 → 400.
+		// At 3, adapter's +1 = 4, always safe.
+		const droppedByLimit = enforceMarkerLimit(payload, 3);
 
 		if (process.env.PI_ANCHOR_CACHE_DEBUG) {
 			const finalMarkers = listMarkers(payload).map(m =>
