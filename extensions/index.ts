@@ -53,13 +53,13 @@ export default function (pi: ExtensionAPI) {
 			for (let i = 0; i < lastAnchorIdx; i++) {
 				const m = messages[i] as any;
 				if (m.role === "toolResult" && !isAnchorToolResult(m)) {
-					if (typeof m.content === "string" && m.content.length > 200) {
-						m.content = m.content.slice(0, 100) + `\n... [truncated, was ${m.content.length} chars]`;
+					if (typeof m.content === "string" && m.content.length > 50) {
+						m.content = m.content.slice(0, 20) + `…✂${m.content.length}`;
 						modified = true;
 					} else if (Array.isArray(m.content)) {
 						for (const part of m.content) {
-							if (part.type === "text" && part.text && part.text.length > 200) {
-								part.text = part.text.slice(0, 100) + `\n... [truncated, was ${part.text.length} chars]`;
+							if (part.type === "text" && part.text && part.text.length > 50) {
+								part.text = part.text.slice(0, 20) + `…✂${part.text.length}`;
 								modified = true;
 							}
 						}
